@@ -14,24 +14,18 @@ namespace UnityStandardAssets.Vehicles.Car
         [SerializeField] private float m_FullTorqueOverAllWheels;
         [SerializeField] private float m_MaxSpeed; // à régler en fonction de la voiture réele
         [SerializeField] private float m_MaxSteerAngleDeg;
-        [SerializeField] private float m_SlipLimit;
-        [SerializeField] private float m_BrakeTorque;
-        [SerializeField] private float m_engineBrakeTorque;
 
         private Quaternion[] m_WheelMeshLocalRotations;
-        private Vector3 m_Prevpos, m_Pos;
         private float m_SteerAngle;
         private float m_OldRotation;
         private float m_CurrentTorque;
         private Rigidbody m_Rigidbody;
         private float _currentSpeed;
 
-        public bool Skidding { get; private set; }
         public float BrakeInput { get; private set; }
         public float CurrentSteerAngle{ get { return m_SteerAngle; }}
         public float CurrentSpeed{ get { return _currentSpeed; }}
         public float MaxSpeed{get { return m_MaxSpeed; }}
-        public float Revs { get; private set; }
         public float AccelInput { get; private set; }
 
         // Use this for initialization

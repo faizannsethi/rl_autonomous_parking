@@ -8,6 +8,7 @@ using Unity.MLAgents.Sensors;
 using Unity.MLAgents.Actuators;
 using Unity.Barracuda;
 using System;
+using UnityEditor;
 
 #pragma warning disable IDE0130 // Namespace does not match folder structure
 namespace UnityStandardAssets.Vehicles.Car
@@ -24,6 +25,13 @@ namespace UnityStandardAssets.Vehicles.Car
         private float[] RayDistancesRightTarget;
         private float RayDistanceFrontTarget;
         private float RayDistanceBackTarget;
+
+        private float[] RayDistancesLeftPrevious;
+        private float[] RayDistancesRightPrevious;
+        private float RayDistanceFrontPrevious;
+        private float RayDistanceBackPrevious;
+
+        private float PreviousDistance = 0f;
 
 
         // GameObjects
@@ -64,6 +72,8 @@ namespace UnityStandardAssets.Vehicles.Car
             RayAmount = RayOutputs.Length - 1;
             RayDistancesLeftTarget = new float[(RayAmount - 2) / 2];
             RayDistancesRightTarget = new float[(RayAmount - 2) / 2];
+            RayDistancesLeftPrevious = new float[(RayAmount - 2) / 2];
+            RayDistancesRightPrevious = new float[(RayAmount - 2) / 2];
 
 
             Reset();   
@@ -127,21 +137,25 @@ namespace UnityStandardAssets.Vehicles.Car
         {
             float reward = 0f;
 
-            // Negative reward for each step of 100 / MaxStep
-            // reward -= 100f / MaxStep;
+            // Negative reward for each step of 10 / MaxStep
+            // reward -= 10f / MaxStep;
 
 
-            float distance = CalculateDistanceLidar(ReadRayCast());
+            float distance = CalculateDistanceDotProduct();
+            // float distance = CalculateDistanceLidar(ReadRayCast()) * 100f;
 
-            if (distance < 0.08f && Mathf.Abs(carControllerRC.CurrentSpeed) < 0.2) {
-                reward += 1000f;
-                Debug.Log("Success");
-                EndEpisodeWithSuccess(true, distance);
-            }
+            // if (distance < 5f && Mathf.Abs(carControllerRC.CurrentSpeed) < 0.15) {
+            //     reward += 1000f;
+            //     Debug.Log("Success");
+            //     EndEpisodeWithSuccess(true, distance);
+            // }
 
-            reward += 1f / distance * Mathf.Abs(carControllerRC.CurrentSpeed) / 4f;
+            reward += (PreviousDistance - distance) * 100;
+            PreviousDistance = distance;
 
-            // Debug.Log("Distance: " + distance + " Reward: " + reward);
+            // if (Mathf.Abs(reward) > 1f)
+            //     Debug.Log("Reward: " + reward + " Distance: " + distance);
+
 
             return reward;
         }
@@ -161,7 +175,7 @@ namespace UnityStandardAssets.Vehicles.Car
             float spawnX = UnityEngine.Random.Range(spawnRangeX.x, spawnRangeX.y);
             float spawnZ = UnityEngine.Random.Range(spawnRangeZ.x, spawnRangeZ.y);
             Vector3 spawnPosition = new(spawnX, startPosition.y, spawnZ);
-            Quaternion spawnRotation = Quaternion.Euler(0, UnityEngine.Random.Range(-5f, 5f), 0);
+            Quaternion spawnRotation = Quaternion.Euler(0, UnityEngine.Random.Range(-90f, 90f), 0);
 
             rb.transform.SetLocalPositionAndRotation(spawnPosition, spawnRotation);
         }
@@ -252,9 +266,65 @@ namespace UnityStandardAssets.Vehicles.Car
             distance += Mathf.Abs(RayDistanceFront - RayDistanceFrontTarget);
             distance += Mathf.Abs(RayDistanceBack - RayDistanceBackTarget);
 
-            distance /= (RayDistancesLeft.Length * 2 + 2);
+            distance /= RayDistancesLeft.Length * 2 + 2;
 
             return distance;
+        }
+
+        float CalculateDistanceDotProduct()
+        {
+            // ReadRayCast() 
+            float[] RayDistancesLeftCurrent;
+            float[] RayDistancesRightCurrent;
+            float RayDistanceFrontCurrent;
+            float RayDistanceBackCurrent;
+
+            (RayDistancesLeftCurrent, RayDistancesRightCurrent, RayDistanceFrontCurrent, RayDistanceBackCurrent) = ReadRayCast();
+            // calculate the dot product between the (target - previous) and (target - current) lidar
+
+            float distFrontCurrent = RayDistanceFrontTarget - RayDistanceFrontCurrent;
+            float distBackCurrent = RayDistanceBackTarget - RayDistanceBackCurrent;
+            float[] distLeftCurrent = new float[RayDistancesLeftTarget.Length];
+            float[] distRightCurrent = new float[RayDistancesRightTarget.Length];
+            for (int i = 0; i < RayDistancesLeftTarget.Length; i++) {
+                distLeftCurrent[i] = RayDistancesLeftTarget[i] - RayDistancesLeftCurrent[i];
+                distRightCurrent[i] = RayDistancesRightTarget[i] - RayDistancesRightCurrent[i];
+            }
+
+            float distFrontPrevious = RayDistanceFrontTarget - RayDistanceFrontPrevious;
+            float distBackPrevious = RayDistanceBackTarget - RayDistanceBackPrevious;
+            float[] distLeftPrevious = new float[RayDistancesLeftTarget.Length];
+            float[] distRightPrevious = new float[RayDistancesRightTarget.Length];
+            for (int i = 0; i < RayDistancesLeftTarget.Length; i++) {
+                distLeftPrevious[i] = RayDistancesLeftTarget[i] - RayDistancesLeftPrevious[i];
+                distRightPrevious[i] = RayDistancesRightTarget[i] - RayDistancesRightPrevious[i];
+            }
+
+            float dotProductLeft = DotProduct(distLeftCurrent, distLeftPrevious);
+            float dotProductRight = DotProduct(distRightCurrent, distRightPrevious);
+            float dotProductFront = distFrontCurrent * distFrontPrevious;
+            float dotProductBack = distBackCurrent * distBackPrevious;
+
+            float distance = dotProductLeft + dotProductRight + dotProductFront + dotProductBack;
+
+            RayDistancesLeftPrevious = RayDistancesLeftCurrent;
+            RayDistancesRightPrevious = RayDistancesRightCurrent;
+            RayDistanceFrontPrevious = RayDistanceFrontCurrent;
+            RayDistanceBackPrevious = RayDistanceBackCurrent;
+
+            return distance;
+        }
+
+        float DotProduct(float[] a, float[] b)
+        {
+            float dotProduct = 0f;
+
+            for (int i = 0; i < a.Length; i++)
+            {
+                dotProduct += a[i] * b[i];
+            }
+
+            return dotProduct;
         }
 
         void OnTriggerEnter(Collider other)
