@@ -144,11 +144,11 @@ namespace UnityStandardAssets.Vehicles.Car
             float distance = CalculateDistanceDotProduct();
             // float distance = CalculateDistanceLidar(ReadRayCast()) * 100f;
 
-            // if (distance < 5f && Mathf.Abs(carControllerRC.CurrentSpeed) < 0.15) {
-            //     reward += 1000f;
-            //     Debug.Log("Success");
-            //     EndEpisodeWithSuccess(true, distance);
-            // }
+            if (distance < 5f && Mathf.Abs(carControllerRC.CurrentSpeed) < 0.15) {
+                reward += 1000f;
+                Debug.Log("Success");
+                EndEpisodeWithSuccess(true, distance);
+            }
 
             reward += (PreviousDistance - distance) * 100;
             PreviousDistance = distance;
