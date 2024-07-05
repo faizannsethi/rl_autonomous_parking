@@ -19,11 +19,7 @@ behaviors:
     reward_signals:
       extrinsic:
         gamma: 0.99
-        strength: 0.7
-      gail:
-        strength: 0.3
-        demo_path: Demos/Park90RCDemo.demo
-        use_actions: true
+        strength: 1
 
 
     keep_checkpoints: 15

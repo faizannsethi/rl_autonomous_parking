@@ -31,7 +31,12 @@ namespace UnityStandardAssets.Vehicles.Car
         private float RayDistanceFrontPrevious;
         private float RayDistanceBackPrevious;
 
+        private RayPerceptionOutput.RayOutput[] RawRayOutputs;
+
         private float PreviousDistance = 0f;
+
+        private ActionSegment<float> LastAction;
+        private float[] CurrentRays;
 
 
         // GameObjects
@@ -49,7 +54,7 @@ namespace UnityStandardAssets.Vehicles.Car
 
         // Use to benchmark the agent
         private readonly Queue<bool> successQueue = new();
-        private readonly Queue<float> multiplierQueue = new();
+        private readonly Queue<float> distanceToTargetLidarQueue = new();
         private const int queueSize = 100;
 
 
@@ -57,7 +62,9 @@ namespace UnityStandardAssets.Vehicles.Car
         public override void Initialize()
         {
             carControllerRC = GetComponent<CarControllerRC>();
-            RayPerceptionSensorComponent3D = GetComponent<RayPerceptionSensorComponent3D>();
+            GameObject Sensor = transform.Find("Sensor").gameObject;
+            RayPerceptionSensorComponent3D = Sensor.GetComponent<RayPerceptionSensorComponent3D>();
+            // RayPerceptionSensorComponent3D = GetComponent<RayPerceptionSensorComponent3D>();
             rb = GetComponent<Rigidbody>();
             statsRecorder = Academy.Instance.StatsRecorder;
 
@@ -84,24 +91,24 @@ namespace UnityStandardAssets.Vehicles.Car
             Reset();
         }
 
-        private void EndEpisodeWithSuccess(bool wasSuccessful, float multiplier = 0f)
+        private void EndEpisodeWithSuccess(bool wasSuccessful, float distanceToTargetLidar = -1f)
         {
             if (successQueue.Count >= queueSize) {
                 successQueue.Dequeue();
-                multiplierQueue.Dequeue();
+                distanceToTargetLidarQueue.Dequeue();
             }
 
             successQueue.Enqueue(wasSuccessful);
-            multiplierQueue.Enqueue(multiplier);
+            distanceToTargetLidarQueue.Enqueue(distanceToTargetLidar);
 
             float successRate = CalculateSuccessRate();
-            float averageMultiplier = CalculateAverageMultiplier();
+            float averageDistance = CalculateAverageDistance();
 
 
             statsRecorder.Add("ParkingSuccessRate", successRate);
-            statsRecorder.Add("ParkingMultiplier", averageMultiplier);
+            if (distanceToTargetLidar != -1f)
+                statsRecorder.Add("ParkingMultiplier", averageDistance);
 
-            // Debug.Log("Reward: " + GetCumulativeReward());
 
             EndEpisode();
         }
@@ -117,14 +124,14 @@ namespace UnityStandardAssets.Vehicles.Car
             return (float)successCount / successQueue.Count * 100;
         }
 
-        private float CalculateAverageMultiplier()
+        private float CalculateAverageDistance()
         {
             float totalMultiplier = 0f;
-            foreach (float multiplier in multiplierQueue) {
+            foreach (float multiplier in distanceToTargetLidarQueue) {
                 totalMultiplier += multiplier;
             }
 
-            return totalMultiplier / multiplierQueue.Count;
+            return totalMultiplier / distanceToTargetLidarQueue.Count;
         }
 
         void FixedUpdate()
@@ -183,12 +190,33 @@ namespace UnityStandardAssets.Vehicles.Car
 
         public override void CollectObservations(VectorSensor sensor)
         {
+            float[] RayDistancesLeftCurrent;
+            float[] RayDistancesRightCurrent;
+            float RayDistanceFrontCurrent;
+            float RayDistanceBackCurrent;
+
+            (RayDistancesLeftCurrent, RayDistancesRightCurrent, RayDistanceFrontCurrent, RayDistanceBackCurrent) = ReadRayCast();
+
+            RayPerceptionInput RayPerceptionIn = RayPerceptionSensorComponent3D.GetRayPerceptionInput();
+            RayPerceptionOutput RayPerceptionOut = RayPerceptionSensor.Perceive(RayPerceptionIn);
+            RawRayOutputs = RayPerceptionOut.RayOutputs;
+
+
+            // Add the lidar data to the observation
+            sensor.AddObservation(RayDistanceFrontCurrent);
+            for (int i = 0; i < RayDistancesRightCurrent.Length; i++)
+                sensor.AddObservation(RayDistancesRightCurrent[i]);
+            sensor.AddObservation(RayDistanceBackCurrent);
+            for (int i = 0; i < RayDistancesLeftCurrent.Length; i++)
+                sensor.AddObservation(RayDistancesLeftCurrent[i]);
         }
 
         public override void OnActionReceived(ActionBuffers actions)
         {
             float steering = actions.ContinuousActions[0];
             float speed = actions.ContinuousActions[1];
+
+            LastAction = actions.ContinuousActions;
 
             // Debug.Log("steering: " + Mathf.Round(steering*100f)/100 + " speed: " + Mathf.Round(speed*100f)/100 + " steps: " + steps);
 
@@ -198,6 +226,17 @@ namespace UnityStandardAssets.Vehicles.Car
             float reward = CalculateReward();
 
             AddReward(reward);
+
+            // Si on appuie sur la touche espace, on affiche les données du lidar
+            if (Input.GetKeyDown(KeyCode.Space)) {
+                
+                CurrentRays = new float[RawRayOutputs.Length - 1];
+                for (int i = 0; i < RawRayOutputs.Length - 1; i++)
+                    CurrentRays[i] = RawRayOutputs[i].HitFraction;
+
+                Debug.Log("Lidar(" + CurrentRays.Length + "):" + ArrayToString(CurrentRays)); 
+                Debug.Log("Last action: Steering: " + LastAction[0] + "Speed: " + LastAction[1]);
+            }
         }
 
         public override void Heuristic(in ActionBuffers actionsOut)
@@ -239,36 +278,18 @@ namespace UnityStandardAssets.Vehicles.Car
             return (RayDistancesLeft, RayDistancesRight, RayDistanceFront, RayDistanceBack);
         }
 
-        private string ArrayToString(float[] array){
+        private string ArrayToString(float[] array) {
             string str = "[";
 
-            for(int i = 0; i < array.Length; i++){
-                str += array[i] + "  ";
+            for (int i = 0; i < array.Length; i++) {
+                str += array[i].ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (i != array.Length - 1)
+                    str += ", ";
             }
 
             str += "]";
 
             return str;
-        }
-
-        float CalculateDistanceLidar((float[] RayDistancesLeft, float[] RayDistancesRight, float RayDistanceFront, float RayDistanceBack) rayData) 
-        {
-            var (RayDistancesLeft, RayDistancesRight, RayDistanceFront, RayDistanceBack) = rayData;
-            float distance = 0f;
-
-            // Calculate the distance between the targetDistance and the current distance lidar
-            for (int i = 0; i < RayDistancesLeft.Length; i++)
-            {
-                distance += Mathf.Abs(RayDistancesLeft[i] - RayDistancesLeftTarget[i]);
-                distance += Mathf.Abs(RayDistancesRight[i] - RayDistancesRightTarget[i]);
-            }
-
-            distance += Mathf.Abs(RayDistanceFront - RayDistanceFrontTarget);
-            distance += Mathf.Abs(RayDistanceBack - RayDistanceBackTarget);
-
-            distance /= RayDistancesLeft.Length * 2 + 2;
-
-            return distance;
         }
 
         float CalculateDistanceDotProduct()
@@ -332,7 +353,7 @@ namespace UnityStandardAssets.Vehicles.Car
             // idem que en bas
             if (other.gameObject.CompareTag("envWall"))
             {
-                AddReward(-100f);
+                AddReward(-1000f);
                 EndEpisodeWithSuccess(false);
                 Debug.Log("Out of bounds");
             }
@@ -343,7 +364,7 @@ namespace UnityStandardAssets.Vehicles.Car
             // a suprimer et a remplacer par une condition sur le lidar
             if (collision.gameObject.CompareTag("Car"))
             {
-                AddReward(-100f);
+                AddReward(-300f);
                 EndEpisodeWithSuccess(false);
                 Debug.Log("Collision with car");
             }
