@@ -136,7 +136,6 @@ namespace UnityStandardAssets.Vehicles.Car
 
         void FixedUpdate()
         {
-            // Get desicion from python by requesting the next action
             RequestDecision();
         }
 
@@ -160,7 +159,7 @@ namespace UnityStandardAssets.Vehicles.Car
             reward += (PreviousDistance - distance) * 100;
             PreviousDistance = distance;
 
-            // if (Mathf.Abs(reward) > 1f)
+            // if (Mathf.Abs(reward) > 3f)
             //     Debug.Log("Reward: " + reward + " Distance: " + distance);
 
 
